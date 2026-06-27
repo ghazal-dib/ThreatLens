@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThreatLens — APT29 Threat Hunting Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #11161f;
+    --surface-2: #161c28;
+    --surface-3: #1b2230;
+    --border: #232b39;
+    --text: #e7eaf0;
+    --text-dim: #919dae;
+    --text-faint: #5b6577;
+    --accent: #2dd4bf;
+    --accent-dim: rgba(45,212,191,0.12);
+    --high: #f25555;
+    --high-bg: rgba(242,85,85,0.10);
+    --high-border: rgba(242,85,85,0.35);
+    --medium: #f5a623;
+    --medium-bg: rgba(245,166,35,0.10);
+    --medium-border: rgba(245,166,35,0.35);
+    --mono: 'SF Mono', 'Cascadia Mono', 'Consolas', 'Roboto Mono', monospace;
+    --sans: -apple-system, 'Segoe UI', system-ui, Helvetica, Arial, sans-serif;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+
+  /* ---------------- HEADER ---------------- */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 28px 32px 22px;
+    background: linear-gradient(180deg, #0d121a 0%, var(--bg) 100%);
+  }
+  .header-row {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    flex-wrap: wrap; gap: 18px; max-width: 1240px; margin: 0 auto;
+  }
+  .title-block .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 6px;
+  }
+  h1 {
+    margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .subtitle { color: var(--text-dim); font-size: 14px; margin-top: 6px; }
+  .date-badge {
+    font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 5px 12px; display: inline-flex;
+    align-items: center; gap: 6px; margin-top: 10px;
+  }
+  .date-badge::before { content: "●"; color: var(--accent); font-size: 9px; }
+
+  .chip-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 12px; padding: 8px 14px;
+    border-radius: var(--radius); border: 1px solid var(--border);
+    background: var(--surface); display: flex; gap: 8px; align-items: baseline;
+    min-width: 108px;
+  }
+  .chip .n { font-size: 18px; font-weight: 700; }
+  .chip .l { color: var(--text-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .chip.high { border-color: var(--high-border); }
+  .chip.high .n { color: var(--high); }
+  .chip.medium { border-color: var(--medium-border); }
+  .chip.medium .n { color: var(--medium); }
+  .chip.accent { border-color: rgba(45,212,191,0.35); }
+  .chip.accent .n { color: var(--accent); }
+
+  /* ---------------- NAV ---------------- */
+  nav {
+    display: flex; gap: 4px; max-width: 1240px; margin: 0 auto;
+    padding: 0 32px; border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  nav button {
+    background: none; border: none; color: var(--text-dim);
+    font-family: var(--sans); font-size: 13.5px; font-weight: 600;
+    padding: 14px 18px; cursor: pointer; border-bottom: 2px solid transparent;
+    white-space: nowrap; transition: color 0.15s;
+  }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { max-width: 1240px; margin: 0 auto; padding: 28px 32px 60px; }
+  section { display: none; }
+  section.active { display: block; animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  h2 { font-size: 17px; font-weight: 700; margin: 0 0 4px; }
+  .section-desc { color: var(--text-dim); font-size: 13px; margin: 0 0 20px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+  }
+  .card .big-num { font-size: 30px; font-weight: 700; font-family: var(--mono); }
+  .card .num-label { color: var(--text-dim); font-size: 12px; margin-top: 4px; }
+  .card .num-sub { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 20px; }
+  .panel h3 { margin: 0 0 12px; font-size: 14px; font-weight: 700; }
+
+  /* ---------------- CALLOUT ---------------- */
+  .callout {
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    background: var(--surface); border-radius: var(--radius);
+    padding: 16px 20px; margin-bottom: 20px; font-size: 13px; line-height: 1.6; color: var(--text-dim);
+  }
+  .callout strong { color: var(--text); }
+  .callout-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+  .sev-rule { display: flex; gap: 14px; margin-top: 10px; }
+  .sev-rule > div { flex: 1; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); }
+  .sev-rule .sev-tag { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+  .sev-rule .high-block { border-color: var(--high-border); background: var(--high-bg); }
+  .sev-rule .high-block .sev-tag { color: var(--high); }
+  .sev-rule .medium-block { border-color: var(--medium-border); background: var(--medium-bg); }
+  .sev-rule .medium-block .sev-tag { color: var(--medium); }
+  @media (max-width: 700px) { .sev-rule { flex-direction: column; } }
+
+  /* ---------------- TABLE ---------------- */
+  .table-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
+  .filter-btns { display: flex; gap: 6px; }
+  .filter-btns button {
+    font-family: var(--mono); font-size: 11.5px; padding: 6px 12px;
+    border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-dim); cursor: pointer;
+  }
+  .filter-btns button.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .result-count { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th {
+    text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-faint); padding: 8px 12px;
+    border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--accent); }
+  thead th .arrow { opacity: 0.5; margin-left: 3px; }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+  tbody tr:hover { background: var(--surface-2); }
+  tbody td.mono { font-family: var(--mono); color: var(--text); }
+  .sev-pill {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700; padding: 2px 8px;
+    border-radius: 4px; letter-spacing: 0.03em;
+  }
+  .sev-pill.High { background: var(--high-bg); color: var(--high); border: 1px solid var(--high-border); }
+  .sev-pill.Medium { background: var(--medium-bg); color: var(--medium); border: 1px solid var(--medium-border); }
+  .table-scroll { max-height: 480px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .table-scroll table thead th { position: sticky; top: 0; background: var(--surface); }
+
+  /* ---------------- TIMELINE (hero) ---------------- */
+  .timeline-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 24px 16px; margin-bottom: 24px; position: relative; }
+  .timeline-title { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 18px; }
+  #timelineSvg { width: 100%; display: block; overflow: visible; }
+  .tl-tooltip {
+    position: absolute; background: #06090f; border: 1px solid var(--accent);
+    border-radius: 6px; padding: 10px 12px; font-size: 11.5px; font-family: var(--mono);
+    color: var(--text); pointer-events: none; opacity: 0; transition: opacity 0.1s;
+    max-width: 280px; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .tl-tooltip .t-time { color: var(--accent); font-weight: 700; }
+  .tl-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: 11.5px; color: var(--text-dim); }
+  .tl-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .tl-legend .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  /* ---------------- NARRATIVE ---------------- */
+  .stage {
+    border-left: 2px solid var(--border); padding: 2px 0 2px 20px; margin: 0 0 22px 6px; position: relative;
+  }
+  .stage::before {
+    content: ""; position: absolute; left: -6px; top: 4px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--bg);
+  }
+  .stage.high::before { background: var(--high); }
+  .stage-num { font-family: var(--mono); font-size: 11px; color: var(--text-faint); letter-spacing: 0.05em; }
+  .stage h3 { margin: 4px 0 8px; font-size: 15px; }
+  .stage p { color: var(--text-dim); font-size: 13.5px; line-height: 1.65; margin: 0 0 8px; }
+  .stage code { font-family: var(--mono); background: var(--surface-3); padding: 1px 6px; border-radius: 4px; font-size: 12px; color: var(--accent); }
+
+  .cv-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .cv-table th { text-align: left; color: var(--text-faint); font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .cv-table td { padding: 10px; border-bottom: 1px solid var(--border); }
+  .cv-table .arrow-up { color: var(--high); font-family: var(--mono); }
+
+  footer { text-align: center; color: var(--text-faint); font-size: 11.5px; padding: 30px 0; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-row">
+    <div class="title-block">
+      <div class="eyebrow">ThreatLens</div>
+      <h1>APT29 Threat Hunting &amp; ML Detection Dashboard</h1>
+      <div class="subtitle">Rule-based detection + Isolation Forest anomaly detection — APT29 Mordor Day 1 dataset</div>
+      <div class="date-badge" id="dateBadge">events: 2020-05-02 — all times UTC</div>
+    </div>
+    <div class="chip-row" id="headerChips"></div>
+  </div>
+</header>
+
+<nav id="tabNav">
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="alerts">Rule-Based Alerts</button>
+  <button data-tab="ml">ML Anomalies</button>
+  <button data-tab="finding">Key Finding</button>
+</nav>
+
+<main>
+
+  <!-- ===================== OVERVIEW ===================== -->
+  <section id="overview" class="active">
+    <h2>Dataset Overview</h2>
+    <p class="section-desc">Exploratory view of the raw event data before detection logic is applied.</p>
+
+    <div class="grid-4" id="overviewStats"></div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Logon Type Distribution (by elevated privilege)</h3>
+        <div id="logonChart"></div>
+      </div>
+      <div class="panel">
+        <h3>Process Duration Distribution</h3>
+        <div id="durationChart"></div>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:20px;">
+      <div class="callout-title">Data coverage note</div>
+      Of 460 raw process-creation events, <strong>307 have a matching process-exit event</strong> in this dataset and a measurable duration; the remaining 153 (mostly long-running services, plus one obfuscated PowerShell command with no logged exit) are excluded only from <em>duration-based</em> analysis — they're still fully visible to presence-based rules and the chart above reflects all 460.
+    </div>
+  </section>
+
+  <!-- ===================== RULE-BASED ALERTS ===================== -->
+  <section id="alerts">
+    <h2>Rule-Based Alerts</h2>
+    <p class="section-desc">Five explicit, explainable rules built from known attacker behaviors.</p>
+
+    <div class="callout">
+      <div class="callout-title">How severity is decided</div>
+      <strong>High</strong> = the behavior is dangerous on its own, with no extra context needed. <strong>Medium</strong> = the behavior is unusual but only meaningful combined with other evidence.
+      <div class="sev-rule">
+        <div class="high-block">
+          <div class="sev-tag">HIGH</div>
+          Remote + elevated logons (lateral movement), anti-forensics tools (e.g. <code>sdelete</code>), and obfuscated/encoded PowerShell — each one is a meaningful finding by itself, regardless of how it was triggered or how long it ran.
+        </div>
+        <div class="medium-block">
+          <div class="sev-tag">MEDIUM</div>
+          Short-lived processes and unusual parent/child spawns — a useful lead, but not proof, until corroborated by other alerts or the ML layer.
+        </div>
+      </div>
+    </div>
+
+    <div class="table-controls">
+      <div class="filter-btns" id="severityFilter">
+        <button data-filter="All" class="active">All</button>
+        <button data-filter="High">High</button>
+        <button data-filter="Medium">Medium</button>
+      </div>
+      <div class="result-count" id="alertCount"></div>
+    </div>
+
+    <div class="table-scroll">
+      <table id="alertsTable">
+        <thead>
+          <tr>
+            <th data-key="alert_type">Alert Type <span class="arrow"></span></th>
+            <th data-key="account">Account <span class="arrow"></span></th>
+            <th data-key="time">Time (UTC) <span class="arrow"></span></th>
+            <th data-key="reason">Reason <span class="arrow"></span></th>
+            <th data-key="severity">Severity <span class="arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody id="alertsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== ML ANOMALIES ===================== -->
+  <section id="ml">
+    <h2>ML-Flagged Anomalies (Isolation Forest)</h2>
+    <p class="section-desc">Two independent models — no rules, labels, or knowledge of which account to watch.</p>
+
+    <div class="grid-2" style="margin-bottom:20px;">
+      <div class="panel">
+        <h3>Logon Model</h3>
+        <table class="cv-table">
+          <tr><th></th><th>pbeesly's share</th></tr>
+          <tr><td>of all 297 logons</td><td id="lAll"></td></tr>
+          <tr><td>of 18 flagged anomalies</td><td class="arrow-up" id="lAnom"></td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Process Model</h3>
+        <table class="cv-table">
+          <tr><th></th><th>pbeesly's share</th></tr>
+          <tr><td>of all 460 processes</td><td id="pAll"></td></tr>
+          <tr><td>of 71 flagged anomalies</td><td class="arrow-up" id="pAnom"></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Why this is convincing</div>
+      Neither model was told what pbeesly did. Both still flagged the account far above its baseline share of activity — that's two independent statistical methods converging on the same answer.
+    </div>
+
+    <div class="panel">
+      <h3>Rarest flagged process pairs (parent → child)</h3>
+      <div class="table-scroll" style="max-height:320px;">
+        <table>
+          <thead><tr><th>Parent</th><th>Child</th><th>Pair frequency</th><th>Duration (s)</th></tr></thead>
+          <tbody id="pairsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== KEY FINDING ===================== -->
+  <section id="finding">
+    <h2>Key Finding</h2>
+    <p class="section-desc">A single account — <code style="font-family:var(--mono);color:var(--accent);">pbeesly</code> — shows a complete, four-stage attack pattern on 2020-05-02 (UTC).</p>
+
+    <div class="timeline-wrap">
+      <div class="timeline-title">pbeesly — full event timeline, 02:55:57 – 03:21:32 UTC</div>
+      <svg id="timelineSvg" viewBox="0 0 1180 170"></svg>
+      <div class="tl-legend">
+        <span><span class="dot" style="background:#9b8cff;"></span> Initial Access (ML-only)</span>
+        <span><span class="dot" style="background:var(--high);"></span> High severity</span>
+        <span><span class="dot" style="background:var(--medium);"></span> Medium severity</span>
+      </div>
+      <div class="tl-tooltip" id="tlTooltip"></div>
+    </div>
+
+    <div class="stage high">
+      <div class="stage-num">STAGE 1 · 02:55:57 UTC</div>
+      <h3>Initial Access — RTLO-spoofed screensaver</h3>
+      <p><code>explorer.exe</code> spawned a process disguised using a Unicode <strong>right-to-left override</strong> character (U+202E) — a filename-spoofing technique that makes a malicious <code>.scr</code> executable visually appear to end in a harmless extension. It ran from <code>C:\ProgramData</code> for 330.9 seconds.</p>
+      <p>This exact parent-child pairing occurred <strong>once</strong> across all 460 process-creation events. No rule was written to catch it — an Isolation Forest model flagged it anyway, based purely on how rare that pairing was.</p>
+    </div>
+
+    <div class="stage high">
+      <div class="stage-num">STAGE 2 · 03:04 – 03:21 UTC (16.7 minutes)</div>
+      <h3>Lateral Movement</h3>
+      <p>pbeesly generated <strong>30 logon events</strong> across three logon types (Network, Interactive, RDP) from four distinct source contexts, including <code>172.18.39.2</code>, <code>10.0.1.4</code>, and <code>10.0.1.6</code>. <strong>15 sessions</strong> were both remote <em>and</em> privilege-elevated, each triggering a High-severity Lateral Movement alert.</p>
+      <p>Within this window, <code>PsExec64.exe</code> was used four times to launch <code>python.exe</code> remotely on a host named <code>NASHUA</code> — with a plaintext domain password embedded directly in the command line, a common real-world consequence of process-command-line logging.</p>
+    </div>
+
+    <div class="stage high">
+      <div class="stage-num">STAGE 3 · 03:02, 03:03, 03:16–03:17 UTC</div>
+      <h3>Anti-Forensics</h3>
+      <p><code>sdelete64.exe</code> — a secure-deletion utility — ran <strong>6 separate times</strong>, including once against the very RTLO-named file used for initial access. Severity is High regardless of how long each run took: a larger file legitimately takes longer to wipe, but the tool's presence is the signal, not its speed.</p>
+    </div>
+
+    <div class="stage high">
+      <div class="stage-num">STAGE 4 · 03:21:31 – 03:21:32 UTC</div>
+      <h3>Obfuscated Command Execution</h3>
+      <p>Two PowerShell invocations closed out the session: one using <code>-EncodedCommand</code>, the second decoding a gzip-compressed, Base64-encoded loader that uses .NET reflection to run code entirely in memory — a fileless execution pattern that leaves no file on disk. <strong>Neither process has a recorded exit event</strong>, so without a presence-based rule, both would have been invisible to every duration-dependent check and the ML process model.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Cross-Validation: Rules vs. Machine Learning</h3>
+      <table class="cv-table">
+        <thead><tr><th>Domain</th><th>pbeesly's share of all events</th><th>pbeesly's share of flagged anomalies</th></tr></thead>
+        <tbody>
+          <tr><td>Logons</td><td id="cvLogonAll"></td><td class="arrow-up" id="cvLogonAnom"></td></tr>
+          <tr><td>Processes</td><td id="cvProcAll"></td><td class="arrow-up" id="cvProcAnom"></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>Detection Summary</h3>
+      <table class="cv-table" id="summaryTable"></table>
+    </div>
+  </section>
+
+</main>
+
+<footer>ThreatLens — built on the APT29 Mordor Day 1 dataset · all timestamps UTC, 2020-05-02</footer>
+
+<script>
+const DATA = {"alerts": [{"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "02:58:43", "reason": "Short-lived process execution: sdclt.exe", "severity": "Medium", "seconds": 166.786}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "02:58:43", "reason": "Short-lived process execution: sdclt.exe", "severity": "Medium", "seconds": 166.787}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "02:58:44", "reason": "Short-lived process execution: control.exe", "severity": "Medium", "seconds": 167.833}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "02:58:46", "reason": "Short-lived process execution: cvtres.exe", "severity": "Medium", "seconds": 169.093}, {"alert_type": "Anti-Forensics Tool", "account": "pbeesly", "time": "03:02:06", "reason": "Evidence-destruction tool executed: sdelete64.exe", "severity": "High", "seconds": 369.094}, {"alert_type": "Anti-Forensics Tool", "account": "pbeesly", "time": "03:03:16", "reason": "Evidence-destruction tool executed: sdelete64.exe", "severity": "High", "seconds": 439.071}, {"alert_type": "Anti-Forensics Tool", "account": "pbeesly", "time": "03:03:35", "reason": "Evidence-destruction tool executed: sdelete64.exe", "severity": "High", "seconds": 458.383}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "03:08:06", "reason": "Short-lived process execution: csc.exe", "severity": "Medium", "seconds": 729.164}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "03:08:06", "reason": "Short-lived process execution: cvtres.exe", "severity": "Medium", "seconds": 729.171}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:09:24", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 807.801}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:09:28", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 811.857}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:09:29", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 812.95}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:09:31", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 814.085}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:09:31", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 814.095}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:10:24", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 867.472}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:10:24", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 867.48}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:10:24", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 867.481}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:10:25", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 868.488}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:11:20", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 923.086}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:12:26", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 989.674}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:13:30", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 1053.158}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:14:44", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 1127.395}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "03:16:20", "reason": "Short-lived process execution: rar.exe", "severity": "Medium", "seconds": 1223.731}, {"alert_type": "Anti-Forensics Tool", "account": "pbeesly", "time": "03:16:53", "reason": "Evidence-destruction tool executed: sdelete64.exe", "severity": "High", "seconds": 1256.569}, {"alert_type": "Anti-Forensics Tool", "account": "pbeesly", "time": "03:17:19", "reason": "Evidence-destruction tool executed: sdelete64.exe", "severity": "High", "seconds": 1282.167}, {"alert_type": "Anti-Forensics Tool", "account": "pbeesly", "time": "03:17:42", "reason": "Evidence-destruction tool executed: sdelete64.exe", "severity": "High", "seconds": 1305.543}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:20:47", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 1490.252}, {"alert_type": "Lateral Movement", "account": "pbeesly", "time": "03:20:49", "reason": "Remote logon with elevated privileges", "severity": "High", "seconds": 1492.428}, {"alert_type": "Obfuscated Command Execution", "account": "pbeesly", "time": "03:21:31", "reason": "PowerShell launched with encoding/staging flags", "severity": "High", "seconds": 1534.728}, {"alert_type": "Suspicious Short-Lived Tool", "account": "pbeesly", "time": "03:21:31", "reason": "Short-lived process execution: powershell.exe", "severity": "Medium", "seconds": 1534.728}, {"alert_type": "Obfuscated Command Execution", "account": "pbeesly", "time": "03:21:32", "reason": "PowerShell launched with encoding/staging flags", "severity": "High", "seconds": 1535.214}], "timeline": [{"time": "02:55:57", "seconds": 0, "label": "Initial Access", "detail": "explorer.exe -> [RTLO]cod.3aka3.scr (ran 330.9s, only caught by Isolation Forest)", "type": "initial_access", "severity": "High"}, {"time": "02:58:43", "seconds": 166.786, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: sdclt.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "02:58:43", "seconds": 166.787, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: sdclt.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "02:58:44", "seconds": 167.833, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: control.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "02:58:46", "seconds": 169.093, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: cvtres.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "03:02:06", "seconds": 369.094, "label": "Anti-Forensics Tool", "detail": "Evidence-destruction tool executed: sdelete64.exe", "type": "Anti-Forensics Tool", "severity": "High"}, {"time": "03:03:16", "seconds": 439.071, "label": "Anti-Forensics Tool", "detail": "Evidence-destruction tool executed: sdelete64.exe", "type": "Anti-Forensics Tool", "severity": "High"}, {"time": "03:03:35", "seconds": 458.383, "label": "Anti-Forensics Tool", "detail": "Evidence-destruction tool executed: sdelete64.exe", "type": "Anti-Forensics Tool", "severity": "High"}, {"time": "03:08:06", "seconds": 729.164, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: csc.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "03:08:06", "seconds": 729.171, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: cvtres.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "03:09:24", "seconds": 807.801, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:09:28", "seconds": 811.857, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:09:29", "seconds": 812.95, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:09:31", "seconds": 814.085, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:09:31", "seconds": 814.095, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:10:24", "seconds": 867.472, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:10:24", "seconds": 867.48, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:10:24", "seconds": 867.481, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:10:25", "seconds": 868.488, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:11:20", "seconds": 923.086, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:12:26", "seconds": 989.674, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:13:30", "seconds": 1053.158, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:14:44", "seconds": 1127.395, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:16:20", "seconds": 1223.731, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: rar.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "03:16:53", "seconds": 1256.569, "label": "Anti-Forensics Tool", "detail": "Evidence-destruction tool executed: sdelete64.exe", "type": "Anti-Forensics Tool", "severity": "High"}, {"time": "03:17:19", "seconds": 1282.167, "label": "Anti-Forensics Tool", "detail": "Evidence-destruction tool executed: sdelete64.exe", "type": "Anti-Forensics Tool", "severity": "High"}, {"time": "03:17:42", "seconds": 1305.543, "label": "Anti-Forensics Tool", "detail": "Evidence-destruction tool executed: sdelete64.exe", "type": "Anti-Forensics Tool", "severity": "High"}, {"time": "03:20:47", "seconds": 1490.252, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:20:49", "seconds": 1492.428, "label": "Lateral Movement", "detail": "Remote logon with elevated privileges", "type": "Lateral Movement", "severity": "High"}, {"time": "03:21:31", "seconds": 1534.728, "label": "Obfuscated Command Execution", "detail": "PowerShell launched with encoding/staging flags", "type": "Obfuscated Command Execution", "severity": "High"}, {"time": "03:21:31", "seconds": 1534.728, "label": "Suspicious Short-Lived Tool", "detail": "Short-lived process execution: powershell.exe", "type": "Suspicious Short-Lived Tool", "severity": "Medium"}, {"time": "03:21:32", "seconds": 1535.214, "label": "Obfuscated Command Execution", "detail": "PowerShell launched with encoding/staging flags", "type": "Obfuscated Command Execution", "severity": "High"}], "summary": {"total_logons": 297, "total_processes": 460, "scoreable_processes": 307, "total_rule_alerts": 31, "high_count": 23, "medium_count": 8, "alert_type_counts": {"Lateral Movement": 15, "Suspicious Short-Lived Tool": 8, "Anti-Forensics Tool": 6, "Obfuscated Command Execution": 2}, "total_ml_anomalies": 89, "logon_anomalies": 18, "proc_anomalies": 71, "pbeesly_logon_all_pct": 10.1, "pbeesly_logon_anom_pct": 55.6, "pbeesly_proc_all_pct": 12.2, "pbeesly_proc_anom_pct": 23.9}, "logon_type_chart": {"labels": ["Interactive (2)", "Network (3)", "Service (5)", "RDP (10)"], "elevated": [8, 142, 61, 1], "not_elevated": [7, 76, 0, 1]}, "duration_chart": {"labels": ["<1s", "1-5s", "5-30s", "30s-2m", "2-10m", "10m-1h"], "counts": [117, 41, 43, 56, 41, 9]}};
+
+/* ---------- header chips ---------- */
+const chips = document.getElementById('headerChips');
+chips.innerHTML = `
+  <div class="chip high"><span class="n">${DATA.summary.high_count}</span><span class="l">High alerts</span></div>
+  <div class="chip medium"><span class="n">${DATA.summary.medium_count}</span><span class="l">Medium alerts</span></div>
+  <div class="chip accent"><span class="n">${DATA.summary.total_ml_anomalies}</span><span class="l">ML anomalies</span></div>
+`;
+
+/* ---------- tab nav ---------- */
+document.querySelectorAll('#tabNav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#tabNav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ---------- overview stats ---------- */
+document.getElementById('overviewStats').innerHTML = `
+  <div class="card"><div class="big-num">${DATA.summary.total_logons}</div><div class="num-label">Logon events analyzed</div></div>
+  <div class="card"><div class="big-num">${DATA.summary.total_processes}</div><div class="num-label">Process executions</div><div class="num-sub">${DATA.summary.scoreable_processes} with measurable duration</div></div>
+  <div class="card"><div class="big-num">${DATA.summary.total_rule_alerts}</div><div class="num-label">Rule-based alerts</div><div class="num-sub">${DATA.summary.high_count} High / ${DATA.summary.medium_count} Medium</div></div>
+  <div class="card"><div class="big-num">${DATA.summary.total_ml_anomalies}</div><div class="num-label">ML-flagged anomalies</div><div class="num-sub">${DATA.summary.logon_anomalies} logon / ${DATA.summary.proc_anomalies} process</div></div>
+`;
+
+/* ---------- simple bar chart renderer (SVG) ---------- */
+function renderStackedBar(containerId, labels, seriesA, seriesB, colorA, colorB, labelA, labelB) {
+  const w = 520, h = 220, padL = 118, padR = 50, padB = 30, padT = 10;
+  const max = Math.max(...labels.map((_, i) => (seriesA[i]||0) + (seriesB[i]||0)));
+  const barH = (h - padT - padB) / labels.length - 10;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;">`;
+  labels.forEach((label, i) => {
+    const y = padT + i * (barH + 10);
+    const aw = (seriesA[i]/max) * (w - padL - padR);
+    const bw = (seriesB[i]/max) * (w - padL - padR);
+    svg += `<text x="${padL-10}" y="${y+barH/2+4}" text-anchor="end" font-size="11" fill="#919dae" font-family="monospace">${label}</text>`;
+    svg += `<rect x="${padL}" y="${y}" width="${aw}" height="${barH}" fill="${colorA}" rx="2"/>`;
+    svg += `<rect x="${padL+aw}" y="${y}" width="${bw}" height="${barH}" fill="${colorB}" rx="2"/>`;
+    svg += `<text x="${padL+aw+bw+8}" y="${y+barH/2+4}" font-size="10.5" fill="#5b6577" font-family="monospace">${seriesA[i]+seriesB[i]}</text>`;
+  });
+  svg += `</svg>`;
+  svg += `<div style="display:flex;gap:16px;margin-top:8px;font-size:11.5px;color:#919dae;">
+            <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:9px;height:9px;border-radius:2px;background:${colorA};display:inline-block;"></span>${labelA}</span>
+            <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:9px;height:9px;border-radius:2px;background:${colorB};display:inline-block;"></span>${labelB}</span>
+          </div>`;
+  document.getElementById(containerId).innerHTML = svg;
+}
+renderStackedBar('logonChart', DATA.logon_type_chart.labels, DATA.logon_type_chart.not_elevated, DATA.logon_type_chart.elevated, '#3a4456', '#f25555', 'Not elevated', 'Elevated');
+
+function renderSingleBar(containerId, labels, counts, color) {
+  const w = 520, h = 220, padL = 60, padR = 40, padB = 30, padT = 10;
+  const max = Math.max(...counts);
+  const barH = (h - padT - padB) / labels.length - 10;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;">`;
+  labels.forEach((label, i) => {
+    const y = padT + i * (barH + 10);
+    const bw = (counts[i]/max) * (w - padL - padR);
+    svg += `<text x="${padL-10}" y="${y+barH/2+4}" text-anchor="end" font-size="11" fill="#919dae" font-family="monospace">${label}</text>`;
+    svg += `<rect x="${padL}" y="${y}" width="${bw}" height="${barH}" fill="${color}" rx="2"/>`;
+    svg += `<text x="${padL+bw+8}" y="${y+barH/2+4}" font-size="10.5" fill="#5b6577" font-family="monospace">${counts[i]}</text>`;
+  });
+  svg += `</svg>`;
+  document.getElementById(containerId).innerHTML = svg;
+}
+renderSingleBar('durationChart', DATA.duration_chart.labels, DATA.duration_chart.counts, '#2dd4bf');
+
+/* ---------- alerts table ---------- */
+let currentFilter = 'All';
+let sortKey = 'time';
+let sortDir = 1;
+
+function renderAlerts() {
+  let rows = DATA.alerts.filter(a => currentFilter === 'All' || a.severity === currentFilter);
+  rows = rows.slice().sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (av < bv) return -1 * sortDir;
+    if (av > bv) return 1 * sortDir;
+    return 0;
+  });
+  document.getElementById('alertCount').textContent = `Showing ${rows.length} of ${DATA.alerts.length} alerts`;
+  document.getElementById('alertsBody').innerHTML = rows.map(a => `
+    <tr>
+      <td class="mono">${a.alert_type}</td>
+      <td class="mono">${a.account}</td>
+      <td class="mono">${a.time}</td>
+      <td>${a.reason}</td>
+      <td><span class="sev-pill ${a.severity}">${a.severity}</span></td>
+    </tr>
+  `).join('');
+}
+document.querySelectorAll('#severityFilter button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#severityFilter button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    renderAlerts();
+  });
+});
+document.querySelectorAll('#alertsTable thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+    document.querySelectorAll('#alertsTable thead .arrow').forEach(a => a.textContent = '');
+    th.querySelector('.arrow').textContent = sortDir === 1 ? '▲' : '▼';
+    renderAlerts();
+  });
+});
+renderAlerts();
+
+/* ---------- ML section ---------- */
+document.getElementById('lAll').textContent = DATA.summary.pbeesly_logon_all_pct + '%';
+document.getElementById('lAnom').textContent = DATA.summary.pbeesly_logon_anom_pct + '%';
+document.getElementById('pAll').textContent = DATA.summary.pbeesly_proc_all_pct + '%';
+document.getElementById('pAnom').textContent = DATA.summary.pbeesly_proc_anom_pct + '%';
+document.getElementById('cvLogonAll').textContent = DATA.summary.pbeesly_logon_all_pct + '%';
+document.getElementById('cvLogonAnom').textContent = DATA.summary.pbeesly_logon_anom_pct + '%';
+document.getElementById('cvProcAll').textContent = DATA.summary.pbeesly_proc_all_pct + '%';
+document.getElementById('cvProcAnom').textContent = DATA.summary.pbeesly_proc_anom_pct + '%';
+
+const rarestPairs = [
+  ['svchost.exe','smartscreen.exe',1,301.7],
+  ['explorer.exe','[RTLO]cod.3aka3.scr',1,330.9],
+  ['svchost.exe','provtool.exe',1,1070.9],
+  ['control.exe','powershell.exe',1,1188.3],
+  ['python.exe','python.exe',1,174.2],
+  ['explorer.exe','notepad.exe',1,735.1],
+  ['python.exe','cmd.exe',1,74.9],
+  ['[RTLO]cod.3aka3.scr','cmd.exe',2,128.6],
+  ['[RTLO]cod.3aka3.scr','conhost.exe',2,128.6],
+  ['svchost.exe','audiodg.exe',2,303.7],
+];
+document.getElementById('pairsBody').innerHTML = rarestPairs.map(p => `
+  <tr><td class="mono">${p[0]}</td><td class="mono">${p[1]}</td><td class="mono">${p[2]}</td><td class="mono">${p[3]}</td></tr>
+`).join('');
+
+/* ---------- detection summary table ---------- */
+document.getElementById('summaryTable').innerHTML = `
+  <tr><th>Metric</th><th>Count</th></tr>
+  <tr><td>Rule-based alerts (total)</td><td class="mono">${DATA.summary.total_rule_alerts}</td></tr>
+  <tr><td>— Lateral Movement</td><td class="mono">${DATA.summary.alert_type_counts['Lateral Movement']}</td></tr>
+  <tr><td>— Anti-Forensics Tool</td><td class="mono">${DATA.summary.alert_type_counts['Anti-Forensics Tool']}</td></tr>
+  <tr><td>— Suspicious Short-Lived Tool</td><td class="mono">${DATA.summary.alert_type_counts['Suspicious Short-Lived Tool']}</td></tr>
+  <tr><td>— Obfuscated Command Execution</td><td class="mono">${DATA.summary.alert_type_counts['Obfuscated Command Execution']}</td></tr>
+  <tr><td>ML anomalies (total)</td><td class="mono">${DATA.summary.total_ml_anomalies}</td></tr>
+`;
+
+/* ---------- hero timeline ---------- */
+const tlColors = { High: '#f25555', Medium: '#f5a623', initial_access: '#9b8cff' };
+function renderTimeline() {
+  const svg = document.getElementById('timelineSvg');
+  const w = 1180, h = 170, padL = 20, padR = 20, padT = 30, padB = 40;
+  const maxSec = Math.max(...DATA.timeline.map(e => e.seconds));
+  const x = s => padL + (s / maxSec) * (w - padL - padR);
+  const yLine = h - padB;
+  let content = `<line x1="${padL}" y1="${yLine}" x2="${w-padR}" y2="${yLine}" stroke="#232b39" stroke-width="1.5"/>`;
+  // tick marks every ~5 min
+  for (let t = 0; t <= maxSec; t += 300) {
+    const mins = Math.round(t/60);
+    content += `<line x1="${x(t)}" y1="${yLine-4}" x2="${x(t)}" y2="${yLine+4}" stroke="#232b39"/>`;
+    content += `<text x="${x(t)}" y="${yLine+22}" font-size="10" fill="#5b6577" font-family="monospace" text-anchor="middle">+${mins}m</text>`;
+  }
+  DATA.timeline.forEach((e, i) => {
+    const cx = x(e.seconds);
+    const color = e.type === 'initial_access' ? tlColors.initial_access : tlColors[e.severity];
+    const r = e.type === 'initial_access' ? 7 : 5;
+    content += `<circle class="tl-point" data-i="${i}" cx="${cx}" cy="${yLine}" r="${r}" fill="${color}" stroke="#0a0e14" stroke-width="1.5" style="cursor:pointer;"/>`;
+  });
+  content += `<text x="${x(0)}" y="16" font-size="11" fill="#9b8cff" font-family="monospace" font-weight="bold">Initial Access</text>`;
+  svg.innerHTML = content;
+
+  const tooltip = document.getElementById('tlTooltip');
+  svg.querySelectorAll('.tl-point').forEach(pt => {
+    pt.addEventListener('mouseenter', (ev) => {
+      const e = DATA.timeline[pt.dataset.i];
+      tooltip.innerHTML = `<span class="t-time">${e.time} UTC</span><br>${e.label}<br><span style="color:#5b6577;">${e.detail}</span>`;
+      const rect = svg.getBoundingClientRect();
+      const wrapRect = svg.parentElement.getBoundingClientRect();
+      const cx = parseFloat(pt.getAttribute('cx'));
+      const px = (cx / w) * rect.width;
+      tooltip.style.left = Math.min(px + 10, wrapRect.width - 290) + 'px';
+      tooltip.style.top = '0px';
+      tooltip.style.opacity = '1';
+    });
+    pt.addEventListener('mouseleave', () => { tooltip.style.opacity = '0'; });
+  });
+}
+renderTimeline();
+</script>
+</body>
+</html>

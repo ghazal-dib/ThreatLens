@@ -12,8 +12,30 @@ Outputs two files: features_logons.csv and features_processes.csv
 
 import pandas as pd
 
-df = pd.read_csv("apt29_events.csv")
+df = pd.read_csv("apt29_events.csv", encoding="utf-8")
 df['@timestamp'] = pd.to_datetime(df['@timestamp'])
+
+# ---------------------------------------------------------------
+# MOJIBAKE REPAIR
+# The raw apt29_events.csv has a double-encoding bug baked into it: at
+# least one CommandLine value contains a Unicode RTLO (right-to-left
+# override, U+202E) character used by the attacker for filename spoofing.
+# Somewhere upstream (likely the original Elasticsearch extraction) those
+# UTF-8 bytes got misread as Windows-1252 and re-saved as UTF-8, turning
+# U+202E into the 3-character garbage "â€®". This is a well-known,
+# reversible pattern (encode as cp1252, decode as utf-8) - repair it here
+# so the actual evasion technique is preserved correctly downstream
+# instead of being hidden behind mangled text.
+def _repair_mojibake(text):
+    if not isinstance(text, str):
+        return text
+    try:
+        return text.encode('cp1252').decode('utf-8')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        return text
+
+df['CommandLine'] = df['CommandLine'].apply(_repair_mojibake)
+df['ParentProcessName'] = df['ParentProcessName'].apply(_repair_mojibake)
 
 # ---------------------------------------------------------------
 # 1. LOGON ANALYSIS (Event ID 4624)
@@ -40,9 +62,18 @@ logons['was_elevated'] = logons['TargetLogonId'].isin(elevated_logon_ids)
 proc = df[df.EventID == 4688].copy()
 
 # CommandLine starts with the new process's full path, e.g.
-# "C:\\windows\\system32\\svchost.exe -k LocalSystem"
-proc['NewProcessPath'] = proc['CommandLine'].str.split().str[0]
-proc['NewProcessName'] = proc['NewProcessPath'].str.split('\\').str[-1].str.lower().str.strip('"') 
+# "C:\\windows\\system32\\svchost.exe -k LocalSystem" OR, when the path
+# itself contains spaces (e.g. "C:\Program Files\..."), it's quoted:
+# "C:\\Program Files\\SysinternalsSuite\\sdelete64.exe" /accepteula ...
+# A plain .str.split() on whitespace breaks on the quoted case - it grabs
+# just `"C:\Program` and mislabels every process under a spaced path as
+# "program" (this hid 15 real events, including all 3 sdelete64.exe runs
+# and 4 PsExec64.exe runs, behind a meaningless name). Use a regex that
+# prefers a quoted path if present, falling back to the first whitespace
+# token otherwise.
+_path_pattern = proc['CommandLine'].str.strip().str.extract(r'^"([^"]+)"|^(\S+)')
+proc['NewProcessPath'] = _path_pattern[0].fillna(_path_pattern[1])
+proc['NewProcessName'] = proc['NewProcessPath'].str.split('\\').str[-1].str.lower().str.strip('"')
 proc['ParentProcessNameOnly'] = proc['ParentProcessName'].str.split('\\').str[-1].str.lower()
 
 # Scenario 1 from Chapter 5: Office app spawning a shell/scripting process
@@ -70,13 +101,37 @@ exits = exits.drop_duplicates(subset=['Hostname', 'NewProcessId'])
 
 proc = proc.merge(exits, on=['Hostname', 'NewProcessId'], how='left')
 proc['duration_seconds'] = (proc['exit_time'] - proc['@timestamp']).dt.total_seconds()
-proc = proc[proc['duration_seconds'] >= 0] 
+# IMPORTANT: do NOT drop rows here. Of 460 raw process-creation events, 130
+# have no matching exit event in this dataset (process still running, or
+# the exit just wasn't captured) and a further ~23 produce a negative
+# duration from a reused PID matching the wrong exit. Previously this line
+# dropped all of them outright (proc = proc[proc['duration_seconds'] >= 0]),
+# which silently removed 153 events from EVERY downstream rule and the ML
+# model - including the dataset's one obfuscated/encoded PowerShell command
+# (no exit event was logged for it). Duration-based rules (Alert 2) already
+# handle NaN/negative values safely via explicit >=0 comparisons, which
+# evaluate to False on NaN, so this only changes behavior for rules that
+# don't depend on duration.
+proc.loc[proc['duration_seconds'] < 0, 'duration_seconds'] = pd.NA
+
+# ---------------------------------------------------------------
+# 5. OBFUSCATED/ENCODED COMMAND DETECTION
+# Classic PowerShell obfuscation/staging indicators: encoded commands,
+# hidden windows, or in-memory (gzip+base64) payloads. Presence-based,
+# like suspicious_office_spawn/suspicious_svchost - does not depend on
+# duration, so it still catches processes with no matched exit event.
+# ---------------------------------------------------------------
+OBFUSCATION_PATTERNS = r'-enc\b|-encodedcommand|frombase64string|-w(?:indowstyle)?\s+hidden|-nop\b'
+proc['obfuscated_command'] = (
+    proc['NewProcessName'].isin(['powershell.exe', 'powershell_ise.exe']) &
+    proc['CommandLine'].str.contains(OBFUSCATION_PATTERNS, case=False, regex=True, na=False)
+)
 
 # ---------------------------------------------------------------
 # SAVE RESULTS
 # ---------------------------------------------------------------
-logons.to_csv("features_logons.csv", index=False)
-proc.to_csv("features_processes.csv", index=False)
+logons.to_csv("features_logons.csv", index=False, encoding="utf-8")
+proc.to_csv("features_processes.csv", index=False, encoding="utf-8")
 
 print("=== Logon summary (Event ID 4624) ===")
 print(f"Total logons: {len(logons)}")
@@ -87,6 +142,8 @@ print("\n=== Process summary (Event ID 4688) ===")
 print(f"Total process creations: {len(proc)}")
 print(f"Suspicious office->shell spawns: {proc['suspicious_office_spawn'].sum()}")
 print(f"Suspicious svchost spawns: {proc['suspicious_svchost'].sum()}")
-print(f"Processes with matched exit time: {proc['exit_time'].notna().sum()}")
+print(f"Obfuscated/encoded command executions: {proc['obfuscated_command'].sum()}")
+print(f"Processes with matched, valid exit time: {proc['duration_seconds'].notna().sum()}")
+print(f"Processes with no usable duration (excluded from duration-based rules only): {proc['duration_seconds'].isna().sum()}")
 
 print("\nSaved features_logons.csv and features_processes.csv")

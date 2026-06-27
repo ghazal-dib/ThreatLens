@@ -24,15 +24,25 @@ from sklearn.ensemble import IsolationForest
 # ---------------------------------------------------------------
 # LOAD DATA
 # ---------------------------------------------------------------
-logons = pd.read_csv("features_logons.csv")
-proc = pd.read_csv("features_processes.csv") 
+logons = pd.read_csv("features_logons.csv", encoding="utf-8")
+proc = pd.read_csv("features_processes.csv", encoding="utf-8") 
 # ---------------------------------------------------------------
 # NEW FEATURE: pair_frequency
 # How many times does this exact (parent -> child) process
 # relationship occur across the whole dataset? Rare pairs (low count)
 # are statistically unusual even when duration looks normal.
+#
+# A few raw events have no logged CommandLine at all (e.g. some SYSTEM-
+# level process creations), so NewProcessName/ParentProcessNameOnly can
+# be NaN. Fill those with a placeholder before building pair_key so
+# pair_frequency is always a real number - leaving it as NaN here would
+# silently propagate into IsolationForest and crash with "Input contains
+# NaN" at fit time instead of failing somewhere obvious.
 # ---------------------------------------------------------------
-proc['pair_key'] = proc['ParentProcessNameOnly'] + ' -> ' + proc['NewProcessName']
+proc['pair_key'] = (
+    proc['ParentProcessNameOnly'].fillna('(unknown)') + ' -> ' +
+    proc['NewProcessName'].fillna('(unknown)')
+)
 pair_counts = proc['pair_key'].value_counts()
 proc['pair_frequency'] = proc['pair_key'].map(pair_counts)
  
@@ -59,15 +69,22 @@ print()
 # ---------------------------------------------------------------
 # FOREST #2: Processes
 # Now using 4 features instead of 3 - pair_frequency adds real signal
-# since the two suspicious_* flags have zero variance in this dataset
+# since the two suspicious_* flags have zero variance in this dataset.
+# duration_seconds is NaN for processes with no matched exit event, so
+# the model is fit only on the subset with a usable duration; the rest
+# (e.g. the obfuscated PowerShell command, which has no exit event) are
+# marked as "not scored" here - they're still caught by Alert 5 instead.
 # ---------------------------------------------------------------
-X_proc = proc[['duration_seconds', 'suspicious_office_spawn',
-               'suspicious_svchost', 'pair_frequency']]
- 
+proc_scoreable = proc['duration_seconds'].notna()
+feature_cols = ['duration_seconds', 'suspicious_office_spawn', 'suspicious_svchost', 'pair_frequency']
+X_proc = proc.loc[proc_scoreable, feature_cols]
+
 model_proc = IsolationForest(random_state=42)
-proc['anomaly_score'] = model_proc.fit_predict(X_proc)
- 
+proc['anomaly_score'] = pd.NA
+proc.loc[proc_scoreable, 'anomaly_score'] = model_proc.fit_predict(X_proc)
+
 print("=== Forest #2: Process Anomalies ===")
+print(f"Scored: {proc_scoreable.sum()} / {len(proc)} (rest have no usable duration)")
 print(proc['anomaly_score'].value_counts())
 print()
  
@@ -87,8 +104,8 @@ print()
 # ---------------------------------------------------------------
 # SAVE SCORED FULL DATASETS
 # ---------------------------------------------------------------
-logons.to_csv("features_logons_scored.csv", index=False)
-proc.to_csv("features_processes_scored.csv", index=False)
+logons.to_csv("features_logons_scored.csv", index=False, encoding="utf-8")
+proc.to_csv("features_processes_scored.csv", index=False, encoding="utf-8")
  
 # ---------------------------------------------------------------
 # BUILD ml_alerts.csv
@@ -97,9 +114,6 @@ anomalous_logons['detection_source'] = 'logon_anomaly'
 anomalous_proc['detection_source'] = 'proc_anomaly'
  
 ml_alerts = pd.concat([anomalous_logons, anomalous_proc], ignore_index=True, sort=False)
-ml_alerts.to_csv("ml_alerts.csv", index=False)
-scr_alert = ml_alerts[ml_alerts['NewProcessName'] == 'â€®cod.3aka3.scr']
-print(scr_alert.to_string())
+ml_alerts.to_csv("ml_alerts.csv", index=False, encoding="utf-8")
 print(f"Saved features_logons_scored.csv, features_processes_scored.csv, ml_alerts.csv")
 print(f"Total ML-flagged anomalies: {len(ml_alerts)}")
- 

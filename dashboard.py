@@ -1,3 +1,4 @@
+
 import pandas as pd
 import streamlit as st
 
@@ -12,8 +13,9 @@ html, body, [class*="css"] { font-size: 20px; }
 # ---------------------------------------------------------------
 # DATA LOADING
 # Split into two separate cached functions, each returning a single
-# DataFrame - more reliable with the older @st.cache API (Streamlit 1.10)
-# than one function returning a tuple of two DataFrames.
+# DataFrame. Uses @st.cache_data - the legacy @st.cache API used here
+# previously was removed in current Streamlit releases, so this would
+# have crashed on import for anyone running a modern `pip install streamlit`.
 # ---------------------------------------------------------------
 @st.cache
 def load_alerts():
